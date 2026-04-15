@@ -1,0 +1,709 @@
+import pygame
+import random
+import sys
+
+pygame.init()
+pygame.mixer.init()
+
+warning_sound = pygame.mixer.Sound("assets/shoot.mp3")
+warning_sound.set_volume(0.35)
+
+
+def get_korean_font(size):
+    candidates = ["malgungothic", "applegothic", "nanumgothic", "notosanscjk"]
+    for name in candidates:
+        font = pygame.font.SysFont(name, size)
+        if font.get_ascent() > 0:
+            return font
+    return pygame.font.SysFont(None, size)
+
+
+WIDTH, HEIGHT = 800, 600
+
+GRID = 10
+BLOCK_SIZE = GRID * 2
+MOVE_STEP = BLOCK_SIZE
+
+FPS = 60
+
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GREEN = (50, 200, 50)
+DARK = (30, 150, 30)
+RED = (255, 30, 30)
+YELLOW = (255, 200, 0)
+GRAY = (40, 40, 40)
+GRID_COLOR = (20, 20, 20)
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Snake")
+clock = pygame.time.Clock()
+font = get_korean_font(36)
+font_big = get_korean_font(72)
+
+LEVELS = {
+    1: {"speed": 8, "label": "Easy"},
+    2: {"speed": 12, "label": "Normal"},
+    3: {"speed": 18, "label": "Hard"},
+}
+level = 1
+
+# 폭탄 위협표시 시간
+WARNING_SHOW_1 = 0.70
+WARNING_HIDE_1 = 0.40
+WARNING_SHOW_2 = 0.70
+WARNING_HIDE_2 = 0.40
+WARNING_SHOW_3 = 0.70
+
+# 폭탄 터지는 시간 조정
+DANGER_TOTAL_DURATION = 1.825
+DANGER_SWAP_INTERVAL = 0.219
+
+TRAP_RESPAWN_DELAY = 10.0
+FIRST_TRAP_DELAY = 3.0
+
+WARNING_PATTERN = [
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+    [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+    [0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0],
+    [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1],
+    [0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0],
+    [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+]
+
+DANGER_PATTERN = [
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+]
+
+PATTERN_WIDTH = len(WARNING_PATTERN[0])
+PATTERN_HEIGHT = len(WARNING_PATTERN)
+
+DOT_SIZE = GRID
+TRAP_WIDTH = PATTERN_WIDTH * DOT_SIZE
+TRAP_HEIGHT = PATTERN_HEIGHT * DOT_SIZE
+
+GOBLIN_SIZE = BLOCK_SIZE * 8
+GOBLIN_FIRST_SPAWN_DELAY = 3.0
+GOBLIN_ACTIVE_DURATION = 9.0
+GOBLIN_RESPAWN_DELAY = 9.0
+GOBLIN_SPEED = 2.0
+GOBLIN_TURN_INTERVAL_MIN = 1.2
+GOBLIN_TURN_INTERVAL_MAX = 2.4
+GOBLIN_ANIM_FPS = 10
+GOBLIN_AXIS_SWITCH_MIN_TIME = 0.5
+
+GOBLIN_SHEET_COLS = 11
+GOBLIN_SHEET_ROWS = 5
+GOBLIN_WALK_FRAMES = 8
+
+DIR_UP = "up"
+DIR_DOWN = "down"
+DIR_LEFT = "left"
+DIR_RIGHT = "right"
+
+
+def load_goblin_frames(path, target_size):
+    sheet = pygame.image.load(path).convert()
+    sheet.set_colorkey((0, 0, 0))
+
+    sheet_width, sheet_height = sheet.get_size()
+    frame_w = sheet_width // GOBLIN_SHEET_COLS
+    frame_h = sheet_height // GOBLIN_SHEET_ROWS
+
+    rows = []
+    for row in range(GOBLIN_SHEET_ROWS):
+        frame_list = []
+        for col in range(GOBLIN_SHEET_COLS):
+            frame = pygame.Surface((frame_w, frame_h)).convert()
+            frame.blit(
+                sheet,
+                (0, 0),
+                pygame.Rect(col * frame_w, row * frame_h, frame_w, frame_h)
+            )
+            frame.set_colorkey((0, 0, 0))
+            frame = pygame.transform.scale(frame, (target_size, target_size))
+            frame_list.append(frame)
+        rows.append(frame_list)
+
+    frames = {
+        DIR_DOWN: rows[0][:GOBLIN_WALK_FRAMES],
+        DIR_LEFT: rows[3][:GOBLIN_WALK_FRAMES],
+        DIR_UP: rows[2][:GOBLIN_WALK_FRAMES],
+        DIR_RIGHT: rows[1][:GOBLIN_WALK_FRAMES],
+    }
+    return frames
+
+
+try:
+    goblin_frames = load_goblin_frames("assets/images/player.png", GOBLIN_SIZE)
+except Exception:
+    goblin_frames = None
+
+
+def new_food(snake, trap_rect=None):
+    while True:
+        pos = (
+            random.randrange(0, (WIDTH - BLOCK_SIZE) // MOVE_STEP + 1) * MOVE_STEP,
+            random.randrange(0, (HEIGHT - BLOCK_SIZE) // MOVE_STEP + 1) * MOVE_STEP,
+        )
+        food_rect = pygame.Rect(pos[0], pos[1], BLOCK_SIZE, BLOCK_SIZE)
+
+        blocked = False
+
+        if pos in snake:
+            blocked = True
+
+        if trap_rect is not None and food_rect.colliderect(trap_rect):
+            blocked = True
+
+        if not blocked:
+            return pos
+
+
+def new_trap_position(snake, food):
+    while True:
+        x = random.randrange(0, WIDTH - TRAP_WIDTH + 1, GRID)
+        y = random.randrange(0, HEIGHT - TRAP_HEIGHT + 1, GRID)
+        trap_rect = pygame.Rect(x, y, TRAP_WIDTH, TRAP_HEIGHT)
+
+        blocked = False
+
+        food_rect = pygame.Rect(food[0], food[1], BLOCK_SIZE, BLOCK_SIZE)
+        if trap_rect.colliderect(food_rect):
+            blocked = True
+
+        for seg in snake:
+            seg_rect = pygame.Rect(seg[0], seg[1], BLOCK_SIZE, BLOCK_SIZE)
+            if trap_rect.colliderect(seg_rect):
+                blocked = True
+                break
+
+        if not blocked:
+            return (x, y)
+
+
+def draw_grid():
+    for x in range(0, WIDTH, GRID):
+        pygame.draw.line(screen, GRID_COLOR, (x, 0), (x, HEIGHT))
+    for y in range(0, HEIGHT, GRID):
+        pygame.draw.line(screen, GRID_COLOR, (0, y), (WIDTH, y))
+
+
+def draw_snake(snake):
+    for i, seg in enumerate(snake):
+        color = DARK if i == 0 else GREEN
+        pygame.draw.rect(screen, color, (seg[0], seg[1], BLOCK_SIZE, BLOCK_SIZE))
+
+
+def draw_hud(score, level):
+    screen.blit(font.render(f"Score: {score}", True, WHITE), (10, 10))
+    screen.blit(font.render(f"Level: {LEVELS[level]['label']}", True, WHITE), (10, 40))
+
+
+def game_over_screen(score):
+    screen.fill(GRAY)
+    screen.blit(font_big.render("GAME OVER", True, RED), (220, 220))
+    screen.blit(font.render(f"Score: {score}", True, WHITE), (350, 310))
+    screen.blit(font.render("R: Restart   Q: Quit", True, WHITE), (270, 360))
+    pygame.display.flip()
+
+    while True:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_r:
+                    return
+                if e.key == pygame.K_q:
+                    pygame.quit()
+                    sys.exit()
+
+
+def level_select_screen():
+    screen.fill(GRAY)
+    screen.blit(font_big.render("SNAKE", True, GREEN), (310, 160))
+    for lv, info in LEVELS.items():
+        screen.blit(
+            font.render(f"{lv}: {info['label']}", True, WHITE), (340, 250 + lv * 40)
+        )
+    pygame.display.flip()
+
+    while True:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                    return int(e.unicode)
+
+
+def draw_pattern(pattern, top_left, color):
+    start_x, start_y = top_left
+    for row_idx, row in enumerate(pattern):
+        for col_idx, value in enumerate(row):
+            if value == 1:
+                px = start_x + col_idx * DOT_SIZE
+                py = start_y + row_idx * DOT_SIZE
+                pygame.draw.rect(screen, color, (px, py, DOT_SIZE, DOT_SIZE))
+
+
+def get_warning_visible(elapsed):
+    timeline = [
+        ("show", WARNING_SHOW_1),
+        ("hide", WARNING_HIDE_1),
+        ("show", WARNING_SHOW_2),
+        ("hide", WARNING_HIDE_2),
+        ("show", WARNING_SHOW_3),
+    ]
+
+    current = 0.0
+    for state, duration in timeline:
+        current += duration
+        if elapsed < current:
+            return state == "show"
+    return False
+
+
+def warning_finished(elapsed):
+    total = (
+        WARNING_SHOW_1
+        + WARNING_HIDE_1
+        + WARNING_SHOW_2
+        + WARNING_HIDE_2
+        + WARNING_SHOW_3
+    )
+    return elapsed >= total
+
+
+def danger_active_image_is_red(elapsed):
+    swap_index = int(elapsed / DANGER_SWAP_INTERVAL) % 2
+    return swap_index == 0
+
+
+def rect_hits_danger_pattern(rect, trap_pos):
+    for row in range(PATTERN_HEIGHT):
+        for col in range(PATTERN_WIDTH):
+            if DANGER_PATTERN[row][col] == 1:
+                cell_rect = pygame.Rect(
+                    trap_pos[0] + col * DOT_SIZE,
+                    trap_pos[1] + row * DOT_SIZE,
+                    DOT_SIZE,
+                    DOT_SIZE,
+                )
+                if rect.colliderect(cell_rect):
+                    return True
+    return False
+
+
+def random_cardinal_direction():
+    return random.choice(
+        [
+            (1, 0, DIR_RIGHT),
+            (-1, 0, DIR_LEFT),
+            (0, -1, DIR_UP),
+            (0, 1, DIR_DOWN),
+        ]
+    )
+
+
+def spawn_goblin():
+    side = random.choice(["top", "bottom", "left", "right"])
+
+    if side == "top":
+        start_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        start_y = -GOBLIN_SIZE
+        target_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        target_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+    elif side == "bottom":
+        start_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        start_y = HEIGHT + GOBLIN_SIZE
+        target_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        target_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+    elif side == "left":
+        start_x = -GOBLIN_SIZE
+        start_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+        target_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        target_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+    else:
+        start_x = WIDTH + GOBLIN_SIZE
+        start_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+        target_x = random.randint(0, WIDTH - GOBLIN_SIZE)
+        target_y = random.randint(0, HEIGHT - GOBLIN_SIZE)
+
+    return {
+        "state": "entering",
+        "x": float(start_x),
+        "y": float(start_y),
+        "target_x": float(target_x),
+        "target_y": float(target_y),
+        "dir_name": DIR_DOWN,
+        "anim_index": 0.0,
+        "turn_time": 0.0,
+        "active_until": 0.0,
+        "cooldown_until": 0.0,
+        "score_taken_lock": False,
+        "axis_toggle": 0,
+        "axis_switch_timer": 0.0,
+    }
+
+
+def move_toward_point(entity, dt):
+    dx = entity["target_x"] - entity["x"]
+    dy = entity["target_y"] - entity["y"]
+
+    entity["axis_switch_timer"] += dt
+
+    if abs(dx) <= GOBLIN_SPEED and abs(dy) <= GOBLIN_SPEED:
+        entity["x"] = entity["target_x"]
+        entity["y"] = entity["target_y"]
+        entity["axis_switch_timer"] = 0.0
+        return True
+
+    prefer_x = entity["axis_toggle"] == 0
+    moved = False
+
+    if prefer_x and abs(dx) > 0:
+        step = min(GOBLIN_SPEED, abs(dx))
+        entity["x"] += step if dx > 0 else -step
+        entity["dir_name"] = DIR_RIGHT if dx > 0 else DIR_LEFT
+        moved = True
+    elif (not prefer_x) and abs(dy) > 0:
+        step = min(GOBLIN_SPEED, abs(dy))
+        entity["y"] += step if dy > 0 else -step
+        entity["dir_name"] = DIR_DOWN if dy > 0 else DIR_UP
+        moved = True
+    else:
+        if abs(dx) > 0:
+            step = min(GOBLIN_SPEED, abs(dx))
+            entity["x"] += step if dx > 0 else -step
+            entity["dir_name"] = DIR_RIGHT if dx > 0 else DIR_LEFT
+            moved = True
+        elif abs(dy) > 0:
+            step = min(GOBLIN_SPEED, abs(dy))
+            entity["y"] += step if dy > 0 else -step
+            entity["dir_name"] = DIR_DOWN if dy > 0 else DIR_UP
+            moved = True
+
+    if moved and entity["axis_switch_timer"] >= GOBLIN_AXIS_SWITCH_MIN_TIME:
+        entity["axis_toggle"] = 1 - entity["axis_toggle"]
+        entity["axis_switch_timer"] = 0.0
+
+    return False
+
+
+def choose_roaming_target(entity):
+    target_x = random.randrange(0, WIDTH - GOBLIN_SIZE + 1, GRID)
+    target_y = random.randrange(0, HEIGHT - GOBLIN_SIZE + 1, GRID)
+
+    entity["target_x"] = float(target_x)
+    entity["target_y"] = float(target_y)
+
+    dx = entity["target_x"] - entity["x"]
+    dy = entity["target_y"] - entity["y"]
+
+    if abs(dx) >= abs(dy):
+        entity["dir_name"] = DIR_RIGHT if dx > 0 else DIR_LEFT
+        entity["axis_toggle"] = 0
+    else:
+        entity["dir_name"] = DIR_DOWN if dy > 0 else DIR_UP
+        entity["axis_toggle"] = 1
+
+    entity["axis_switch_timer"] = 0.0
+
+
+def choose_exit_target(entity):
+    side = random.choice(["top", "bottom", "left", "right"])
+
+    if side == "top":
+        entity["target_x"] = float(random.randint(0, WIDTH - GOBLIN_SIZE))
+        entity["target_y"] = float(-GOBLIN_SIZE - 10)
+    elif side == "bottom":
+        entity["target_x"] = float(random.randint(0, WIDTH - GOBLIN_SIZE))
+        entity["target_y"] = float(HEIGHT + GOBLIN_SIZE + 10)
+    elif side == "left":
+        entity["target_x"] = float(-GOBLIN_SIZE - 10)
+        entity["target_y"] = float(random.randint(0, HEIGHT - GOBLIN_SIZE))
+    else:
+        entity["target_x"] = float(WIDTH + GOBLIN_SIZE + 10)
+        entity["target_y"] = float(random.randint(0, HEIGHT - GOBLIN_SIZE))
+
+    entity["axis_switch_timer"] = 0.0
+
+
+def update_goblin(entity, now, dt):
+    if entity["state"] == "waiting":
+        if now >= entity["cooldown_until"]:
+            new_entity = spawn_goblin()
+            new_entity["active_until"] = now + GOBLIN_ACTIVE_DURATION
+            return new_entity
+        return entity
+
+    if entity["state"] == "entering":
+        arrived = move_toward_point(entity, dt)
+        if arrived:
+            entity["state"] = "roaming"
+            entity["turn_time"] = now + random.uniform(
+                GOBLIN_TURN_INTERVAL_MIN, GOBLIN_TURN_INTERVAL_MAX
+            )
+            choose_roaming_target(entity)
+
+    elif entity["state"] == "roaming":
+        if now >= entity["active_until"]:
+            entity["state"] = "leaving"
+            choose_exit_target(entity)
+        else:
+            move_toward_point(entity, dt)
+            if now >= entity["turn_time"]:
+                choose_roaming_target(entity)
+                entity["turn_time"] = now + random.uniform(
+                    GOBLIN_TURN_INTERVAL_MIN, GOBLIN_TURN_INTERVAL_MAX
+                )
+
+    elif entity["state"] == "leaving":
+        arrived = move_toward_point(entity, dt)
+
+        outside = (
+            entity["x"] + GOBLIN_SIZE < 0
+            or entity["x"] > WIDTH
+            or entity["y"] + GOBLIN_SIZE < 0
+            or entity["y"] > HEIGHT
+        )
+
+        if arrived or outside:
+            entity["state"] = "cooldown"
+            entity["cooldown_until"] = now + GOBLIN_RESPAWN_DELAY
+
+    elif entity["state"] == "cooldown":
+        if now >= entity["cooldown_until"]:
+            entity["state"] = "waiting"
+            entity["cooldown_until"] = now + GOBLIN_FIRST_SPAWN_DELAY
+
+    if entity["state"] in ("entering", "roaming", "leaving"):
+        entity["anim_index"] += GOBLIN_ANIM_FPS * dt
+    else:
+        entity["anim_index"] = 0.0
+
+    return entity
+
+
+def draw_goblin(entity):
+    if entity["state"] not in ("entering", "roaming", "leaving"):
+        return
+
+    rect = pygame.Rect(int(entity["x"]), int(entity["y"]), GOBLIN_SIZE, GOBLIN_SIZE)
+
+    if goblin_frames is None:
+        pygame.draw.rect(screen, YELLOW, rect)
+        pygame.draw.rect(screen, BLACK, rect, 2)
+        return
+
+    frames = goblin_frames[entity["dir_name"]]
+    frame = frames[int(entity["anim_index"]) % len(frames)]
+    screen.blit(frame, rect.topleft)
+
+
+def goblin_rect(entity):
+    return pygame.Rect(int(entity["x"]), int(entity["y"]), GOBLIN_SIZE, GOBLIN_SIZE)
+
+
+def run_game():
+    global level
+    level = level_select_screen()
+
+    start_x = (WIDTH // 2 // MOVE_STEP) * MOVE_STEP
+    start_y = (HEIGHT // 2 // MOVE_STEP) * MOVE_STEP
+
+    snake = [(start_x, start_y)]
+    direction = (MOVE_STEP, 0)
+    next_direction = direction
+
+    food = new_food(snake)
+    score = 0
+    speed = LEVELS[level]["speed"]
+    move_delay = 1.0 / speed
+
+    now = pygame.time.get_ticks() / 1000.0
+    last_move_time = now
+    last_frame_time = now
+
+    trap_state = "inactive"
+    trap_pos = None
+    trap_start_time = 0.0
+    next_trap_time = now + FIRST_TRAP_DELAY
+
+    goblin = {
+        "state": "waiting",
+        "x": -9999.0,
+        "y": -9999.0,
+        "target_x": 0.0,
+        "target_y": 0.0,
+        "dir_name": DIR_DOWN,
+        "anim_index": 0.0,
+        "turn_time": 0.0,
+        "active_until": 0.0,
+        "cooldown_until": now + GOBLIN_FIRST_SPAWN_DELAY,
+        "score_taken_lock": False,
+        "axis_toggle": 0,
+        "axis_switch_timer": 0.0,
+    }
+
+    while True:
+        clock.tick(FPS)
+        now = pygame.time.get_ticks() / 1000.0
+        dt = now - last_frame_time
+        last_frame_time = now
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_UP and direction != (0, MOVE_STEP):
+                    next_direction = (0, -MOVE_STEP)
+                elif e.key == pygame.K_DOWN and direction != (0, -MOVE_STEP):
+                    next_direction = (0, MOVE_STEP)
+                elif e.key == pygame.K_LEFT and direction != (MOVE_STEP, 0):
+                    next_direction = (-MOVE_STEP, 0)
+                elif e.key == pygame.K_RIGHT and direction != (-MOVE_STEP, 0):
+                    next_direction = (MOVE_STEP, 0)
+
+        if trap_state == "inactive" and now >= next_trap_time:
+            trap_pos = new_trap_position(snake, food)
+            trap_state = "warning"
+            trap_start_time = now
+            warning_sound.stop()
+            warning_sound.play()
+
+        elif trap_state == "warning":
+            elapsed = now - trap_start_time
+            if warning_finished(elapsed):
+                trap_state = "danger"
+                trap_start_time = now
+
+        elif trap_state == "danger":
+            elapsed = now - trap_start_time
+            if elapsed >= DANGER_TOTAL_DURATION:
+                trap_state = "inactive"
+                trap_pos = None
+                next_trap_time = now + TRAP_RESPAWN_DELAY
+
+        goblin = update_goblin(goblin, now, dt)
+
+        if goblin["state"] in ("entering", "roaming", "leaving"):
+            g_rect = goblin_rect(goblin)
+            current_head_rect = pygame.Rect(
+                snake[0][0], snake[0][1], BLOCK_SIZE, BLOCK_SIZE
+            )
+
+            if current_head_rect.colliderect(g_rect):
+                if not goblin["score_taken_lock"]:
+                    score = 0
+
+                    trap_rect = None
+                    if trap_pos is not None:
+                        trap_rect = pygame.Rect(
+                            trap_pos[0], trap_pos[1], TRAP_WIDTH, TRAP_HEIGHT
+                        )
+
+                    food = new_food(snake, trap_rect)
+                    goblin["score_taken_lock"] = True
+            else:
+                goblin["score_taken_lock"] = False
+        else:
+            goblin["score_taken_lock"] = False
+
+        if now - last_move_time >= move_delay:
+            last_move_time += move_delay
+            direction = next_direction
+
+            head = (snake[0][0] + direction[0], snake[0][1] + direction[1])
+            head_rect = pygame.Rect(head[0], head[1], BLOCK_SIZE, BLOCK_SIZE)
+
+            if (
+                head[0] < 0
+                or head[0] + BLOCK_SIZE > WIDTH
+                or head[1] < 0
+                or head[1] + BLOCK_SIZE > HEIGHT
+                or head in snake
+            ):
+                return score
+
+            if trap_state == "danger" and trap_pos is not None:
+                if rect_hits_danger_pattern(head_rect, trap_pos):
+                    return score
+
+            snake.insert(0, head)
+
+            if head == food:
+                score += 10
+
+                trap_rect = None
+                if trap_pos is not None:
+                    trap_rect = pygame.Rect(
+                        trap_pos[0], trap_pos[1], TRAP_WIDTH, TRAP_HEIGHT
+                    )
+
+                food = new_food(snake, trap_rect)
+
+                if score % 50 == 0 and level < 3:
+                    level = min(level + 1, 3)
+                    speed = LEVELS[level]["speed"]
+                    move_delay = 1.0 / speed
+            else:
+                snake.pop()
+
+        screen.fill(GRAY)
+        draw_grid()
+
+        pygame.draw.rect(screen, RED, (food[0], food[1], BLOCK_SIZE, BLOCK_SIZE))
+        draw_snake(snake)
+
+        if trap_pos is not None:
+            if trap_state == "warning":
+                elapsed = now - trap_start_time
+                if get_warning_visible(elapsed):
+                    draw_pattern(WARNING_PATTERN, trap_pos, RED)
+
+            elif trap_state == "danger":
+                elapsed = now - trap_start_time
+                if danger_active_image_is_red(elapsed):
+                    draw_pattern(DANGER_PATTERN, trap_pos, RED)
+                else:
+                    draw_pattern(DANGER_PATTERN, trap_pos, YELLOW)
+
+        draw_goblin(goblin)
+
+        draw_hud(score, level)
+        pygame.display.flip()
+
+
+def main():
+    while True:
+        score = run_game()
+        game_over_screen(score)
+
+
+main()
